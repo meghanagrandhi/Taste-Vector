@@ -7,9 +7,401 @@
     <link rel="stylesheet" href="/static/style.css">
   </head>
   <body>
-    <main>
-      <h1>TasteVector</h1>
-      <p>Personalized restaurant recommendations powered by linear algebra.</p>
+    <main class="app-shell">
+      <section class="intro" aria-labelledby="page-title">
+        <div>
+          <p class="eyebrow">TasteVector</p>
+          <h1 id="page-title">Find restaurants that match your taste vector.</h1>
+          <p class="lede">
+            Choose your constraints, add any ratings you already know, and rank restaurants using the recommendation engine.
+          </p>
+        </div>
+        <div class="intro-side">
+          <img
+            src="https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=720&q=80"
+            alt="Restaurant table with warm lighting"
+          >
+          <div class="status-panel" aria-label="System status">
+            <span class="status-dot" id="api-dot"></span>
+            <span id="api-status">Checking API</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace" aria-label="Recommendation workspace">
+        <form class="preference-form" id="recommend-form">
+          <div class="form-header">
+            <h2>Your Preferences</h2>
+            <p>Leave user ID blank to use cold-start recommendations.</p>
+          </div>
+
+          <div class="field-grid">
+            <label>
+              <span>User ID</span>
+              <input id="user-id" name="user_id" type="number" min="1" placeholder="Optional">
+            </label>
+
+            <label>
+              <span>Cuisine</span>
+              <select id="cuisine" name="cuisine">
+                <option value="">Any cuisine</option>
+                <option value="Indian">Indian</option>
+                <option value="Italian">Italian</option>
+                <option value="Chinese">Chinese</option>
+                <option value="Mexican">Mexican</option>
+                <option value="Thai">Thai</option>
+                <option value="Japanese">Japanese</option>
+                <option value="Mediterranean">Mediterranean</option>
+                <option value="American">American</option>
+              </select>
+            </label>
+
+            <label>
+              <span>Max Price</span>
+              <input id="max-price" name="max_price" type="range" min="1" max="5" value="3">
+              <output id="price-output" for="max-price">3</output>
+            </label>
+
+            <label>
+              <span>Spice Tolerance</span>
+              <input id="spice-tolerance" name="spice_tolerance" type="range" min="1" max="5" value="3">
+              <output id="spice-output" for="spice-tolerance">3</output>
+            </label>
+
+            <label>
+              <span>Max Distance</span>
+              <input id="max-distance" name="max_distance" type="number" min="0.5" step="0.5" value="8">
+            </label>
+
+            <label>
+              <span>Results</span>
+              <input id="top-n" name="top_n" type="number" min="1" max="20" value="5">
+            </label>
+          </div>
+
+          <section class="ratings-section" aria-labelledby="ratings-title">
+            <div class="section-title-row">
+              <div>
+                <h2 id="ratings-title">Known Ratings</h2>
+                <p>Optional ratings help the system learn faster during a session.</p>
+              </div>
+              <button class="ghost-button" id="refresh-restaurants" type="button">Load Restaurants</button>
+            </div>
+            <div class="ratings-list" id="ratings-list">
+              <p class="muted">Restaurant ratings will appear after the API is available.</p>
+            </div>
+          </section>
+
+          <div class="actions">
+            <button class="primary-button" id="submit-button" type="submit">Get Recommendations</button>
+            <button class="secondary-button" id="reset-button" type="reset">Reset</button>
+          </div>
+        </form>
+
+        <section class="results-panel" aria-labelledby="results-title" aria-live="polite">
+          <div class="section-title-row">
+            <div>
+              <h2 id="results-title">Recommendations</h2>
+              <p id="results-summary">Your ranked list will appear here.</p>
+            </div>
+          </div>
+
+          <div class="message" id="message" hidden></div>
+          <div class="results-list" id="results-list"></div>
+        </section>
+      </section>
     </main>
+
+    <template id="restaurant-rating-template">
+      <article class="rating-row">
+        <div>
+          <strong data-name></strong>
+          <span data-meta></span>
+        </div>
+        <label>
+          <span>Rating</span>
+          <select data-rating>
+            <option value="">Not rated</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+          </select>
+        </label>
+      </article>
+    </template>
+
+    <template id="result-template">
+      <article class="result-card">
+        <div class="rank-badge" data-rank></div>
+        <div class="result-content">
+          <div class="result-heading">
+            <h3 data-name></h3>
+            <span data-score></span>
+          </div>
+          <dl>
+            <div>
+              <dt>Cuisine</dt>
+              <dd data-cuisine></dd>
+            </div>
+            <div>
+              <dt>Price</dt>
+              <dd data-price></dd>
+            </div>
+            <div>
+              <dt>Spice</dt>
+              <dd data-spice></dd>
+            </div>
+            <div>
+              <dt>Distance</dt>
+              <dd data-distance></dd>
+            </div>
+          </dl>
+        </div>
+      </article>
+    </template>
+
+    <script>
+      const form = document.querySelector("#recommend-form");
+      const userIdInput = document.querySelector("#user-id");
+      const cuisineInput = document.querySelector("#cuisine");
+      const priceInput = document.querySelector("#max-price");
+      const spiceInput = document.querySelector("#spice-tolerance");
+      const distanceInput = document.querySelector("#max-distance");
+      const topNInput = document.querySelector("#top-n");
+      const priceOutput = document.querySelector("#price-output");
+      const spiceOutput = document.querySelector("#spice-output");
+      const ratingsList = document.querySelector("#ratings-list");
+      const resultsList = document.querySelector("#results-list");
+      const resultsSummary = document.querySelector("#results-summary");
+      const message = document.querySelector("#message");
+      const submitButton = document.querySelector("#submit-button");
+      const refreshButton = document.querySelector("#refresh-restaurants");
+      const apiStatus = document.querySelector("#api-status");
+      const apiDot = document.querySelector("#api-dot");
+      const ratingTemplate = document.querySelector("#restaurant-rating-template");
+      const resultTemplate = document.querySelector("#result-template");
+
+      let restaurants = [];
+
+      function setMessage(text, type = "info") {
+        message.textContent = text;
+        message.dataset.type = type;
+        message.hidden = !text;
+      }
+
+      function setApiState(state, text) {
+        apiDot.dataset.state = state;
+        apiStatus.textContent = text;
+      }
+
+      function updateRangeLabels() {
+        priceOutput.value = priceInput.value;
+        spiceOutput.value = spiceInput.value;
+      }
+
+      function getNumberValue(input) {
+        return input.value === "" ? null : Number(input.value);
+      }
+
+      async function requestJson(url, options = {}) {
+        const response = await fetch(url, {
+          headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+          ...options
+        });
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || `Request failed with status ${response.status}`);
+        }
+
+        return response.json();
+      }
+
+      function renderRatings(items) {
+        ratingsList.innerHTML = "";
+
+        if (!items.length) {
+          ratingsList.innerHTML = '<p class="muted">No restaurants are available yet.</p>';
+          return;
+        }
+
+        const fragment = document.createDocumentFragment();
+        items.forEach((restaurant) => {
+          const node = ratingTemplate.content.cloneNode(true);
+          const row = node.querySelector(".rating-row");
+          row.dataset.restaurantId = restaurant.restaurant_id;
+          node.querySelector("[data-name]").textContent = restaurant.name;
+          node.querySelector("[data-meta]").textContent = `${restaurant.cuisine} | ${restaurant.distance_km} km | price ${restaurant.price}`;
+          fragment.appendChild(node);
+        });
+
+        ratingsList.appendChild(fragment);
+      }
+
+      function renderResults(items) {
+        resultsList.innerHTML = "";
+
+        if (!items.length) {
+          resultsSummary.textContent = "No restaurants matched those constraints.";
+          return;
+        }
+
+        resultsSummary.textContent = `${items.length} ranked restaurant${items.length === 1 ? "" : "s"} found.`;
+        const fragment = document.createDocumentFragment();
+
+        items.forEach((restaurant, index) => {
+          const node = resultTemplate.content.cloneNode(true);
+          node.querySelector("[data-rank]").textContent = index + 1;
+          node.querySelector("[data-name]").textContent = restaurant.name;
+          node.querySelector("[data-score]").textContent = formatScore(restaurant.predicted_score);
+          node.querySelector("[data-cuisine]").textContent = restaurant.cuisine || "Any";
+          node.querySelector("[data-price]").textContent = formatPrice(restaurant.price);
+          node.querySelector("[data-spice]").textContent = restaurant.spice ?? "N/A";
+          node.querySelector("[data-distance]").textContent = formatDistance(restaurant.distance_km);
+          fragment.appendChild(node);
+        });
+
+        resultsList.appendChild(fragment);
+      }
+
+      function formatScore(score) {
+        if (score === undefined || score === null || Number.isNaN(Number(score))) {
+          return "Score N/A";
+        }
+
+        return `Score ${Number(score).toFixed(2)}`;
+      }
+
+      function formatPrice(price) {
+        const count = Number(price);
+        if (!Number.isFinite(count) || count <= 0) {
+          return "N/A";
+        }
+
+        return "$".repeat(Math.min(count, 5));
+      }
+
+      function formatDistance(distance) {
+        const value = Number(distance);
+        return Number.isFinite(value) ? `${value.toFixed(1)} km` : "N/A";
+      }
+
+      function collectRatings() {
+        return [...ratingsList.querySelectorAll(".rating-row")]
+          .map((row) => {
+            const rating = row.querySelector("[data-rating]").value;
+            return rating
+              ? {
+                  restaurant_id: Number(row.dataset.restaurantId),
+                  rating: Number(rating)
+                }
+              : null;
+          })
+          .filter(Boolean);
+      }
+
+      async function submitRatings(userId, ratings) {
+        if (!userId || !ratings.length) {
+          return;
+        }
+
+        await Promise.all(
+          ratings.map((entry) =>
+            requestJson("/rate", {
+              method: "POST",
+              body: JSON.stringify({
+                user_id: userId,
+                restaurant_id: entry.restaurant_id,
+                rating: entry.rating
+              })
+            })
+          )
+        );
+      }
+
+      async function loadRestaurants() {
+        refreshButton.disabled = true;
+        setMessage("Loading restaurants...", "info");
+
+        try {
+          restaurants = await requestJson("/restaurants");
+          renderRatings(restaurants);
+          setMessage("", "info");
+          setApiState("ready", "API ready");
+        } catch (error) {
+          renderRatings([]);
+          setMessage("The restaurant list could not be loaded. Start the backend and try again.", "error");
+          setApiState("offline", "API offline");
+        } finally {
+          refreshButton.disabled = false;
+        }
+      }
+
+      async function checkHealth() {
+        try {
+          await requestJson("/health");
+          setApiState("ready", "API ready");
+          await loadRestaurants();
+        } catch (error) {
+          setApiState("offline", "API offline");
+          setMessage("Start the backend server to load restaurants and recommendations.", "error");
+        }
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        setMessage("", "info");
+        submitButton.disabled = true;
+        submitButton.textContent = "Ranking...";
+
+        const userId = getNumberValue(userIdInput);
+        const ratings = collectRatings();
+        const payload = {
+          user_id: userId,
+          preferences: {
+            cuisine: cuisineInput.value || null,
+            max_price: Number(priceInput.value),
+            spice_tolerance: Number(spiceInput.value),
+            max_distance: Number(distanceInput.value)
+          },
+          top_n: Number(topNInput.value)
+        };
+
+        try {
+          await submitRatings(userId, ratings);
+          const recommendations = await requestJson("/recommend", {
+            method: "POST",
+            body: JSON.stringify(payload)
+          });
+          renderResults(recommendations);
+          setApiState("ready", "API ready");
+        } catch (error) {
+          renderResults([]);
+          setMessage("Recommendations could not be generated. Check the backend response and try again.", "error");
+          setApiState("offline", "API issue");
+        } finally {
+          submitButton.disabled = false;
+          submitButton.textContent = "Get Recommendations";
+        }
+      });
+
+      form.addEventListener("reset", () => {
+        setTimeout(() => {
+          updateRangeLabels();
+          resultsList.innerHTML = "";
+          resultsSummary.textContent = "Your ranked list will appear here.";
+          setMessage("", "info");
+        }, 0);
+      });
+
+      priceInput.addEventListener("input", updateRangeLabels);
+      spiceInput.addEventListener("input", updateRangeLabels);
+      refreshButton.addEventListener("click", loadRestaurants);
+
+      updateRangeLabels();
+      checkHealth();
+    </script>
   </body>
 </html>
