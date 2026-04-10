@@ -1,0 +1,2 @@
+"""TasteVector API entry point."""
+

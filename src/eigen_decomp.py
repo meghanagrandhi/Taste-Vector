@@ -1,0 +1,2 @@
+"""Eigendecomposition and diagonalization utilities."""
+
